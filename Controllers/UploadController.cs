@@ -1,7 +1,8 @@
+
 using Microsoft.AspNetCore.Mvc;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
-using static System.Runtime.InteropServices.JavaScript.JSType;
+using System.Text.RegularExpressions;
 
 [ApiController]
 [Route("[controller]")]
@@ -24,65 +25,78 @@ public class UploadController : ControllerBase
     [HttpPost("upload")]
     public async Task<IActionResult> Upload(IFormFile file)
     {
-        // check if the file length is greater than 10 * 1024 * 1024
-        //return BadRequest("File too large.");
+        if (file.Length > 10 * 1024 * 1024)
+            return BadRequest("File too large.");
 
-        // Rate Limiting Check
-        //var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-        //  if (IsRateLimitExceeded(ip))
-        //return "Rate limit exceeded. Please try again later."
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        if (IsRateLimitExceeded(ip))
+            return BadRequest("Rate limit exceeded. Please try again later.");
 
-        //  Executable File Check
-        // if (IsExecutableFile(file))
-        //return "Executable files are not allowed."
+        if (IsExecutableFile(file))
+            return BadRequest("Executable files are not allowed.");
 
-        // Generate UniqueID for tracking
         var id = Guid.NewGuid().ToString();
-        // SanitizeFileName
+        var sanitized = SanitizeFileName(file.FileName);
 
-        //Read all the file content here
+        using var ms = new MemoryStream();
+        await file.CopyToAsync(ms);
+        var fileBytes = ms.ToArray();
+
+        var simulateScan = bool.Parse(_config["SimulateAntivirusScan"] ?? "false");
+        var delay = int.Parse(_config["ScanDelayMilliseconds"] ?? "2000");
+
+        var storagePath = Path.Combine(_env.WebRootPath, "uploads");
 
         UploadStatusTracker.StatusMap[id] = "Pending";
 
-        //Write the file to the stream so that it can be trackable
         await _uploadChannel.Writer.WriteAsync(new FileUploadTask
         {
-            //ProcessingId = id,
-            //FileContent = //Content of the file,
-            //OriginalFileName = sanitized,
-            //SimulateScan = //Read key "SimulateAntivirusScan" from appsettings to enable and disable the scan,
-            //ScanDelayMs = //Read key "ScanDelayMilliseconds" from appsettings to put the delay to simulate the virus scan,
-            //StoragePath = Path.Combine(_env.WebRootPath, "uploads") // Set the storage path
+            ProcessingId = id,
+            FileContent = fileBytes,
+            OriginalFileName = sanitized,
+            SimulateScan = simulateScan,
+            ScanDelayMs = delay,
+            StoragePath = storagePath
         });
 
         return Ok(new { processingId = id });
     }
 
-
     [HttpGet("status/{id}")]
     public IActionResult Status(string id)
     {
-        //if (!_statusMap.TryGetValue(id, out var status))
-        //    return NotFound("Invalid ID");
-        //return Ok(new { status });
+        if (!_statusMap.TryGetValue(id, out var status))
+            return NotFound("Invalid ID");
+
+        return Ok(new { status });
     }
 
     private static readonly Dictionary<string, List<DateTime>> UploadLog = new();
 
     private bool IsRateLimitExceeded(string ip, int maxUploads = 5, int intervalSeconds = 60)
     {
-        //Implement the logic that the request should not exceel the maxUploads under the intervalSeconds
+        lock (UploadLog)
+        {
+            if (!UploadLog.ContainsKey(ip))
+                UploadLog[ip] = new List<DateTime>();
+
+            var now = DateTime.UtcNow;
+            UploadLog[ip].RemoveAll(t => (now - t).TotalSeconds > intervalSeconds);
+            UploadLog[ip].Add(now);
+
+            return UploadLog[ip].Count > maxUploads;
+        }
     }
 
     private bool IsExecutableFile(IFormFile file)
     {
-        //using var reader = new BinaryReader(file.OpenReadStream());
-        //var headerBytes = reader.ReadBytes(4);
-        //return headerBytes.Take(2).SequenceEqual(new byte[] { 0x4D, 0x5A });
+        using var reader = new BinaryReader(file.OpenReadStream());
+        var headerBytes = reader.ReadBytes(4);
+        return headerBytes.Length >= 2 && headerBytes[0] == 0x4D && headerBytes[1] == 0x5A; // MZ header
     }
 
     private string SanitizeFileName(string fileName)
     {
-       // .Replace("..", "").Replace("//", "").Replace("\\", "").Replace(":", "");
+        return Regex.Replace(fileName, "[^a-zA-Z0-9_.-]", "_");
     }
 }

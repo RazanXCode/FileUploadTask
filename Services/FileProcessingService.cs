@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Hosting;
 
 public class FileProcessingService : BackgroundService
 {
@@ -21,13 +22,9 @@ public class FileProcessingService : BackgroundService
                 _logger.LogInformation("Processing file: {FileName}", task.OriginalFileName);
                 UploadStatusTracker.StatusMap[task.ProcessingId] = "Scanning";
 
-                // Simulate antivirus scan
                 if (task.SimulateScan)
-                {
-                    //Put a delay by reading this key from appsettings "ScanDelayMilliseconds"
-                }
+                    await Task.Delay(task.ScanDelayMs, stoppingToken);
 
-                // Basic header/content check (simulate)
                 if (!IsFileHeaderValid(task.FileContent))
                 {
                     UploadStatusTracker.StatusMap[task.ProcessingId] = "VirusDetected";
@@ -36,9 +33,9 @@ public class FileProcessingService : BackgroundService
 
                 UploadStatusTracker.StatusMap[task.ProcessingId] = "Processing";
 
-                // Ensure the target directory exists
-                // Upload the file to the path set in the FileUpload task object
-                
+                Directory.CreateDirectory(task.StoragePath);
+                var filePath = Path.Combine(task.StoragePath, task.OriginalFileName);
+                await File.WriteAllBytesAsync(filePath, task.FileContent, stoppingToken);
 
                 UploadStatusTracker.StatusMap[task.ProcessingId] = "Completed";
             }
@@ -52,24 +49,13 @@ public class FileProcessingService : BackgroundService
 
     private bool IsFileHeaderValid(byte[] content)
     {
-        // Simulate checking file "magic bytes"
-        // e.g., check for PDF: 0x25 0x50 0x44 0x46
-        if (content.Length >= 4)
-        {
-            //IF  PDF            
-            //   return true;
+        if (content.Length < 4) return false;
 
-            // JPEG
-            //   return true;
+        if (content[0] == 0x25 && content[1] == 0x50 && content[2] == 0x44 && content[3] == 0x46) return true; // PDF
+        if (content[0] == 0xFF && content[1] == 0xD8) return true; // JPEG
+        if (content[0] == 0x50 && content[1] == 0x4B) return true; // DOCX/ZIP
+        if (content.Take(4).All(b => b < 128)) return true; // Likely ASCII/UTF-8
 
-            // DOCX (ZIP-based format)
-            //   return true;
-
-            // TXT (Basic ASCII/UTF-8 heuristic)
-            //   return true;
-        }
-
-        // If header does not match known types
         return false;
     }
 }

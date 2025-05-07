@@ -8,5 +8,4 @@ public class FileUploadTask
     public bool SimulateScan { get; set; }
     public int ScanDelayMs { get; set; }
     public string StoragePath { get; set; }
-    
 }

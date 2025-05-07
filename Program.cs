@@ -1,20 +1,29 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Add services to the container.
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-builder.Services.AddSingleton(Channel.CreateUnbounded<FileUploadTask>());//: Registers a shared queue for asynchronously handling file upload tasks.
-builder.Services.AddSingleton<ConcurrentDictionary<string, string>>(UploadStatusTracker.StatusMap);// Registers a shared dictionary to track the status of each file upload.
-builder.Services.AddHostedService<FileProcessingService>();//Starts a background service that processes uploaded files from the queue.
+// Register shared services
+builder.Services.AddSingleton(Channel.CreateUnbounded<FileUploadTask>()); 
+builder.Services.AddSingleton<ConcurrentDictionary<string, string>>(UploadStatusTracker.StatusMap); 
+builder.Services.AddHostedService<FileProcessingService>();
 
 var app = builder.Build();
 
-app.UseSwagger();
-app.UseSwaggerUI();
+// Configure the HTTP request pipeline.
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
 app.UseHttpsRedirection();
 app.UseStaticFiles();
@@ -23,5 +32,6 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
 
 public partial class Program { }

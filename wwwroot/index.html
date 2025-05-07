@@ -30,9 +30,9 @@
             font-size: 16px;
         }
 
-            button:hover {
-                background-color: #45a049;
-            }
+        button:hover {
+            background-color: #45a049;
+        }
 
         progress {
             margin-top: 20px;
@@ -41,15 +41,15 @@
             appearance: none;
         }
 
-            progress::-webkit-progress-bar {
-                background-color: #eee;
-                border-radius: 10px;
-            }
+        progress::-webkit-progress-bar {
+            background-color: #eee;
+            border-radius: 10px;
+        }
 
-            progress::-webkit-progress-value {
-                background-color: #4CAF50;
-                border-radius: 10px;
-            }
+        progress::-webkit-progress-value {
+            background-color: #4CAF50;
+            border-radius: 10px;
+        }
 
         #statusText {
             margin-top: 20px;
@@ -71,6 +71,9 @@
     <script>
         function uploadFile() {
             const file = document.getElementById('fileInput').files[0];
+            const statusText = document.getElementById('statusText');
+            const progressBar = document.getElementById('progressBar');
+
             if (!file) {
                 alert("Please select a file.");
                 return;
@@ -80,19 +83,35 @@
             const formData = new FormData();
             formData.append("file", file);
 
+            // Reset UI
+            progressBar.value = 0;
+            statusText.innerText = "Uploading...";
+
             xhr.upload.onprogress = function (e) {
                 if (e.lengthComputable) {
-                    document.getElementById('progressBar').value = (e.loaded / e.total) * 100;
+                    progressBar.value = (e.loaded / e.total) * 100;
                 }
             };
 
             xhr.onload = function () {
                 if (xhr.status === 200) {
-                    const response = JSON.parse(xhr.responseText);
-                    pollStatus(response.processingId);
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        if (response.processingId) {
+                            pollStatus(response.processingId);
+                        } else {
+                            statusText.innerText = "Unexpected response format.";
+                        }
+                    } catch (err) {
+                        statusText.innerText = "Failed to parse response.";
+                    }
                 } else {
-                    document.getElementById('statusText').innerText = "Upload failed: " + xhr.responseText;
+                    statusText.innerText = "Upload failed: " + xhr.responseText;
                 }
+            };
+
+            xhr.onerror = function () {
+                statusText.innerText = "Upload error occurred.";
             };
 
             xhr.open("POST", "/upload/upload");
@@ -100,14 +119,23 @@
         }
 
         function pollStatus(id) {
+            const statusText = document.getElementById('statusText');
+
             const interval = setInterval(() => {
                 fetch(`/upload/status/${id}`)
-                    .then(res => res.json())
+                    .then(res => {
+                        if (!res.ok) throw new Error("Status check failed.");
+                        return res.json();
+                    })
                     .then(data => {
-                        document.getElementById('statusText').innerText = "Status: " + data.status;
+                        statusText.innerText = "Status: " + data.status;
                         if (["Completed", "Failed", "VirusDetected"].includes(data.status)) {
                             clearInterval(interval);
                         }
+                    })
+                    .catch(err => {
+                        statusText.innerText = "Error checking status.";
+                        clearInterval(interval);
                     });
             }, 2000);
         }
